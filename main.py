@@ -58,11 +58,28 @@ def updateBackground(frame, bModel, fgMask, changeCounter, updateFrames, thresho
     updatedModel[updateMask] = frame[updateMask] #update those pixels
     return updatedModel, changeCounter
 
+#detect faces using haar cascade
+def detectFaces(frame, faceCascade, minFaceSize):
+    frameGray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    frameGray = cv2.equalizeHist(frameGray) #equalize for better detection
+
+    faces = faceCascade.detectMultiScale(
+        frameGray,
+        scaleFactor=1.1, #scale increment between checks
+        minNeighbors=5, #how many neighbors to confirm detection
+        minSize=minFaceSize
+    )
+
+    if len(faces) == 0:
+        return []
+
+    return faces
+
 #camera and capture settings
 numBFrames = 30 #num of frames for initial background, b=background
 bUpdateThreshold = 40 #threshold for background update
 bUpdateFrames = 5 #frames needed to update background
-
+minFaceSize = (60, 60) #min face size for detection
 #setup video source
 if len(sys.argv) > 1: #video file passed as argument
     src = sys.argv[1]
@@ -80,6 +97,10 @@ if not os.path.exists(faceXml):
     print(f'Error: Haar cascade not found at {faceXml}')
     sys.exit(1)
 
+faceCascade = cv2.CascadeClassifier(faceXml) #face detector
+totalFacesDetected = 0
+totalFrames = 0
+
 #capture initial background frames
 print(f'Making background model from first {numBFrames} frames...')
 bFrames = [] #b=background
@@ -93,7 +114,7 @@ for i in range(numBFrames):
 bModel = buildBModel(bFrames) #b=background model
 
 #show background model
-cv2.imshow('Background Model', bModel)
+#cv2.imshow('Background Model', bModel) #we prob don't need to show this rn, since its display isn't updating
 print('Background model built')
 
 #initialize change counter for background update
@@ -104,13 +125,47 @@ print('Starting detection, press Q to quit')
 while True:
     ret, cFrame = cap.read() #c=current
 
+    totalFrames+=1
+
     #detect foreground
     fgMask = detectFG(cFrame, bModel, bUpdateThreshold) #fg=foreground
 
     #update background model
     bModel, changeCounter = updateBackground(cFrame, bModel, fgMask, changeCounter, bUpdateFrames, bUpdateThreshold)
 
+    #detect faces in current frame
+    faces = detectFaces(cFrame, faceCascade, minFaceSize)
+
+    #draw foreground mask and bounding boxes on display frame
+    displayFrame = cFrame.copy()
+
+    if len(faces) > 0:
+        for (x, y, w, h) in faces:
+            #check if face overlaps with foreground mask, so we only get moving people, we will see if we change this or not
+            faceMask = fgMask[y:y+h, x:x+w]
+            fgRatio = np.sum(faceMask > 0)/(w*h) #fg=foreground ratio
+
+            if fgRatio > 0.2: #at least 20% of face region is foreground
+                totalFacesDetected+=1
+
+                #draw green box around face
+                cv2.rectangle(displayFrame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                cv2.putText(displayFrame, 'Person', (x, y-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                print(f'Frame {totalFrames}: Face #{totalFacesDetected} detected at x={x}, y={y}, size={w}x{h}')
+
+    #show fg mask as green overlay
+    fgColored = np.zeros_like(cFrame)
+    fgColored[:, :, 1] = fgMask #green channel
+
+    combined = cv2.addWeighted(displayFrame, 1, fgColored, 0.5, 0) #blend mask onto frame
+
+    #frame info
+    cv2.putText(combined, f'Frame: {totalFrames}  Faces: {totalFacesDetected}', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
     cv2.imshow('Foreground Mask', fgMask)
+    cv2.imshow('Basic', displayFrame)
+    cv2.imshow('Detection', combined)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         print('Quit key pressed')
