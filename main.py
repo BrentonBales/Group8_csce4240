@@ -80,6 +80,12 @@ numBFrames = 30 #num of frames for initial background, b=background
 bUpdateThreshold = 40 #threshold for background update
 bUpdateFrames = 5 #frames needed to update background
 minFaceSize = (60, 60) #min face size for detection
+
+#if not os.path.exists('savedFrames'): #prob don't need to save every individual frame but putting this here anyways incase we decide to
+#    os.makedirs('savedFrames')
+if not os.path.exists('detectedFaces'):
+    os.makedirs('detectedFaces')
+
 #setup video source
 if len(sys.argv) > 1: #video file passed as argument
     src = sys.argv[1]
@@ -90,6 +96,12 @@ else:
     src = 0 #webcam index 0
 
 cap = cv2.VideoCapture(src)
+
+if not cap.isOpened():
+    print('Error: Could not open video source')
+    sys.exit(1)
+
+print(f'Video source opened: {src}')
 
 #load haar cascade for face detection
 faceXml = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
@@ -107,6 +119,9 @@ bFrames = [] #b=background
 
 for i in range(numBFrames):
     ret, frame = cap.read()
+    if not ret:
+        print(f'Could only capture {i} frames for background')
+        break
     bFrames.append(frame)
     print(f'Captured background frame {i+1}/{numBFrames}')
 
@@ -152,6 +167,13 @@ while True:
                 cv2.rectangle(displayFrame, (x, y), (x+w, y+h), (0, 255, 0), 2)
                 cv2.putText(displayFrame, 'Person', (x, y-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
+                #crop face
+                faceImg = cFrame[y:y+h, x:x+w] #crop face region
+
+                #save face crop
+                fFilename = f'detectedFaces/face{totalFacesDetected}_frame{totalFrames}.png' #f=face
+                cv2.imwrite(fFilename, faceImg)
+
                 print(f'Frame {totalFrames}: Face #{totalFacesDetected} detected at x={x}, y={y}, size={w}x{h}')
 
     #show fg mask as green overlay
@@ -167,6 +189,10 @@ while True:
     cv2.imshow('Basic', displayFrame)
     cv2.imshow('Detection', combined)
 
+    #save frame, only used if we decide to use it
+    #sFilename = f'savedFrames/frame{totalFrames}.png' #s=saved
+    #cv2.imwrite(sFilename, cFrame)
+
     if cv2.waitKey(1) & 0xFF == ord('q'):
         print('Quit key pressed')
         break
@@ -174,3 +200,4 @@ while True:
 #cleanup
 cap.release()
 cv2.destroyAllWindows()
+print(f'Done. Processed {totalFrames} frames, detected {totalFacesDetected} faces total')
