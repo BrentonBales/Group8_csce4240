@@ -181,8 +181,6 @@ for i in range(numBFrames):
 #build initial background model
 bModel = buildBModel(bFrames) #b=background model
 
-#show background model
-#cv2.imshow('Background Model', bModel) #we prob don't need to show this rn, since its display isn't updating
 print('Background model built')
 
 #initialize change counter for background update
@@ -304,6 +302,7 @@ while True:
     cv2.putText(combined, f'Frame: {totalFrames}  Faces: {totalFacesDetected}', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(255, 255, 255), 2)
     cv2.putText(displayFrame, f'Frame: {totalFrames}  Faces: {totalFacesDetected}', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(255, 255, 255), 2)
 
+    cv2.imshow('Background Model', bModel)
     cv2.imshow('Foreground Mask', fgMask)
     cv2.imshow('Basic', displayFrame)
     cv2.imshow('Detection', combined)
