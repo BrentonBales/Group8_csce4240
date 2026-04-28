@@ -2,9 +2,9 @@ import cv2
 import numpy as np
 import sys
 import os
-import math
 
-from faceMatch import prepareMatch, faceMatch, Person
+from faceMatch import Person
+from face_database import FaceDatabase
 
 #build background model from multiple frames
 def buildBModel(frames):
@@ -78,6 +78,38 @@ def detectFaces(frame, faceCascade, minFaceSize):
 
     return faces
 
+#match face against trained model
+def matchFace(person, images, recognizer, labelToName, matchThreshold, confidenceThreshold):
+    nameAppearances = {}
+
+    #run for each image
+    for img in images:
+        label, distance = recognizer.predict(img)
+        #confidence threshold check
+        if distance < confidenceThreshold:
+            name = labelToName.get(str(label), "Unknown")
+            #add to list if not already a key, increment
+            if name not in nameAppearances:
+                nameAppearances[name] = 0
+            nameAppearances[name] += 1
+
+    #if it matches with nobody, it's still unmatched
+    if len(nameAppearances) <= 0:
+        person.name = ""
+        return
+
+    #get count of most frequent match and the name
+    mostFrequent = max(nameAppearances, key=nameAppearances.get)
+    mostFrequentCount = nameAppearances[mostFrequent]
+
+    #if it meets the threshold, update it, if not, set as unmatched
+    if mostFrequentCount < matchThreshold:
+        person.name = ""
+    else:
+        person.name = mostFrequent
+
+    return
+
 #camera and capture settings
 numBFrames = 30 #num of frames for initial background, b=background
 bUpdateThreshold = 40 #threshold for background update
@@ -86,7 +118,8 @@ minFaceSize = (60, 60) #min face size for detection
 faceDistancePercent = 7  # How close faces must be in frame percentage to count a single person
 faceBufferSize = 15  # Number of faces to store in each person's face buffer
 frameMemory = 1000  # Number of frames without adding a new face capture to the same person before it "forgets"
-match_threshold = 3  # Number of matches to count as a match for each permutation of dict images and images of tracked person
+matchThreshold = 3 #number of matches to count as a match for each permutation of dict images and images of tracked person
+confidenceThreshold = 75 #lower = stricter matching
 
 #if not os.path.exists('savedFrames'): #prob don't need to save every individual frame but putting this here anyways incase we decide to
 #    os.makedirs('savedFrames')
@@ -117,6 +150,19 @@ if not os.path.exists(faceXml):
     sys.exit(1)
 
 faceCascade = cv2.CascadeClassifier(faceXml) #face detector
+
+#load face database and trained model
+db = FaceDatabase()
+recognizer = db.load_model()
+labelToName = db.load_mapping()
+
+if recognizer is None:
+    print('Error: No trained model found. Run face_enroll.py first to enroll people.')
+    print('Or run trainModel.py to train from existing database/raw_faces/')
+    sys.exit(1)
+
+print(f'Loaded model with {len(labelToName)} people: {list(labelToName.values())}')
+
 totalFacesDetected = 0
 totalFrames = 0
 
@@ -154,26 +200,14 @@ face_distance_y = faceDistancePercent * .01 * fHeight
 people_info = []  # Person objects
 people_dict = {}  # Key is a Person, value is list of images
 
-# Get faces from dict
-familiar_faces = {}
-
-names = os.listdir(os.path.join(".", "dict"))
-
-# Get dict images in correct size and grayscale
-for n in names:
-    if n not in familiar_faces:
-        familiar_faces[n] = []
-    for file in os.listdir(os.path.join(".", "dict", n)):
-        im = cv2.imread(os.path.join(".", "dict", n, file))
-        familiar_faces[n].append(cv2.resize(cv2.cvtColor(im, cv2.COLOR_BGR2GRAY), (200, 200)))
-
-# Get recognizer and the label-name conversion
-rec, l2n = prepareMatch(familiar_faces)
-
 #main loop
 print('Starting detection, press Q to quit')
 while True:
     ret, cFrame = cap.read() #c=current
+
+    if not ret:
+        print('End of video or camera disconnected')
+        break
 
     totalFrames+=1
 
@@ -225,7 +259,7 @@ while True:
                 people_info.append(current_person)
                 people_dict[current_person] = []
 
-            if fgRatio > 0.2: #at least 20% of face region is foreground
+            if fgRatio > 0.1: #at least 20% of face region is foreground
                 totalFacesDetected+=1
 
                 # Draw box around face; Unknowns are red, knowns are green
@@ -236,11 +270,18 @@ while True:
                     color = (0, 0, 255)
                     label = "Unknown"
                 cv2.rectangle(displayFrame, (x, y), (x + w, y + h), color, 2)
-                cv2.putText(displayFrame, label, (x, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                cv2.putText(displayFrame, label, (x, y-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
                 #crop face
                 faceImg = cFrame[y:y+h, x:x+w] #crop face region
 
+                #save face to appropriate folder
+                personFolder = current_person.name if current_person.name != "" else "Unknown"
+                personPath = os.path.join('detectedFaces', personFolder)
+                if not os.path.exists(personPath):
+                    os.makedirs(personPath)
+                fFilename = os.path.join(personPath, f'face{totalFacesDetected}_frame{totalFrames}.png') #f=face
+                cv2.imwrite(fFilename, faceImg)
                 # Instead of saving to file, put them in a list
                 # Each person-list is compared against a face dictionary using LBPs
                 # Testing this the cv2 built-in way as a proof of concept
@@ -249,9 +290,9 @@ while True:
                     people_dict[current_person].pop(0)
                 # Don't match if there are less than 3 face captures
                 if len(people_dict[current_person]) >= 3:
-                    faceMatch(current_person, people_dict[current_person], rec, l2n, match_threshold, 60)
+                    matchFace(current_person, people_dict[current_person], recognizer, labelToName, matchThreshold, confidenceThreshold)
 
-                print(f'Frame {totalFrames}: Face #{totalFacesDetected} detected at x={x}, y={y}, size={w}x{h}')
+                print(f'Frame {totalFrames}: Face #{totalFacesDetected} detected at x={x}, y={y}, size={w}x{h}, name={current_person.name if current_person.name else "Unknown"}')
 
     #show fg mask as green overlay
     fgColored = np.zeros_like(cFrame)
@@ -260,8 +301,8 @@ while True:
     combined = cv2.addWeighted(displayFrame, 1, fgColored, 0.5, 0) #blend mask onto frame
 
     #frame info
-    cv2.putText(combined, f'Frame: {totalFrames}  Faces: {totalFacesDetected}', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                (255, 255, 255), 2)
+    cv2.putText(combined, f'Frame: {totalFrames}  Faces: {totalFacesDetected}', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(255, 255, 255), 2)
+    cv2.putText(displayFrame, f'Frame: {totalFrames}  Faces: {totalFacesDetected}', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(255, 255, 255), 2)
 
     cv2.imshow('Foreground Mask', fgMask)
     cv2.imshow('Basic', displayFrame)
