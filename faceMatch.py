@@ -6,6 +6,7 @@ class Person:
         self.xy = xy
         self.name = name
         self.frames = frames
+        self.confidence = 0
 
 def prepareMatch(familiar_dict):
     # Get key value pairs

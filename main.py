@@ -81,6 +81,7 @@ def detectFaces(frame, faceCascade, minFaceSize):
 #match face against trained model
 def matchFace(person, images, recognizer, labelToName, matchThreshold, confidenceThreshold):
     nameAppearances = {}
+    nameDistances = {} #track distances for each name
 
     #run for each image
     for img in images:
@@ -91,12 +92,15 @@ def matchFace(person, images, recognizer, labelToName, matchThreshold, confidenc
             #add to list if not already a key, increment
             if name not in nameAppearances:
                 nameAppearances[name] = 0
+                nameDistances[name] = []
             nameAppearances[name] += 1
+            nameDistances[name].append(distance)
 
     #if it matches with nobody, it's still unmatched
     if len(nameAppearances) <= 0:
         person.name = ""
-        return
+        person.confidence = 0
+        return 0
 
     #get count of most frequent match and the name
     mostFrequent = max(nameAppearances, key=nameAppearances.get)
@@ -105,10 +109,13 @@ def matchFace(person, images, recognizer, labelToName, matchThreshold, confidenc
     #if it meets the threshold, update it, if not, set as unmatched
     if mostFrequentCount < matchThreshold:
         person.name = ""
+        return 0
     else:
         person.name = mostFrequent
-
-    return
+        #get average distance for this name
+        avgDistance = sum(nameDistances[mostFrequent])/len(nameDistances[mostFrequent])
+        person.confidence = int(avgDistance)
+        return int(avgDistance)
 
 #camera and capture settings
 numBFrames = 30 #num of frames for initial background, b=background
@@ -198,6 +205,19 @@ face_distance_y = faceDistancePercent * .01 * fHeight
 people_info = []  # Person objects
 people_dict = {}  # Key is a Person, value is list of images
 
+#find next instance number by checking all person folders
+instanceNum = 1
+if os.path.exists('detectedFaces'):
+    for personFolder in os.listdir('detectedFaces'):
+        personPath = os.path.join('detectedFaces', personFolder)
+        if os.path.isdir(personPath):
+            for instance in os.listdir(personPath):
+                instancePath = os.path.join(personPath, instance)
+                if os.path.isdir(instancePath) and instance.isdigit():
+                    instanceNum = max(instanceNum, int(instance) + 1)
+
+print(f'Instance number for this run: {instanceNum}')
+
 #main loop
 print('Starting detection, press Q to quit')
 while True:
@@ -250,10 +270,12 @@ while True:
                 else:
                     # New person object at coordinates
                     current_person = Person(coords, "", 0)
+                    current_person.confidence = 0
                     people_info.append(current_person)
                     people_dict[current_person] = []
             else:
                 current_person = Person(coords, "", 0)
+                current_person.confidence = 0
                 people_info.append(current_person)
                 people_dict[current_person] = []
 
@@ -263,22 +285,24 @@ while True:
                 # Draw box around face; Unknowns are red, knowns are green
                 if current_person.name != "":
                     color = (0, 255, 0)
-                    label = current_person.name
+                    label = f"{current_person.name} ({current_person.confidence})"
                 else:
                     color = (0, 0, 255)
-                    label = "Unknown"
+                    label = f"Unknown ({current_person.confidence})"
                 cv2.rectangle(displayFrame, (x, y), (x + w, y + h), color, 2)
                 cv2.putText(displayFrame, label, (x, y-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
                 #crop face
                 faceImg = cFrame[y:y+h, x:x+w] #crop face region
 
-                #save face to appropriate folder
+                #save face to appropriate folder with instance number
                 personFolder = current_person.name if current_person.name != "" else "Unknown"
-                personPath = os.path.join('detectedFaces', personFolder)
+                personPath = os.path.join('detectedFaces', personFolder, str(instanceNum))
                 if not os.path.exists(personPath):
                     os.makedirs(personPath)
-                fFilename = os.path.join(personPath, f'face{totalFacesDetected}_frame{totalFrames}.png') #f=face
+                #add confidence to filename
+                conf = getattr(current_person, 'confidence', 0)
+                fFilename = os.path.join(personPath, f'face{totalFacesDetected}_frame{totalFrames}_conf{conf}.png') #f=face
                 cv2.imwrite(fFilename, faceImg)
                 # Instead of saving to file, put them in a list
                 # Each person-list is compared against a face dictionary using LBPs
@@ -290,7 +314,7 @@ while True:
                 if len(people_dict[current_person]) >= 3:
                     matchFace(current_person, people_dict[current_person], recognizer, labelToName, matchThreshold, confidenceThreshold)
 
-                print(f'Frame {totalFrames}: Face #{totalFacesDetected} detected at x={x}, y={y}, size={w}x{h}, name={current_person.name if current_person.name else "Unknown"}')
+                print(f'Frame {totalFrames}: Face #{totalFacesDetected} detected at x={x}, y={y}, size={w}x{h}, name={current_person.name if current_person.name else "Unknown"}, confidence={current_person.confidence}')
 
     #show fg mask as green overlay
     fgColored = np.zeros_like(cFrame)
