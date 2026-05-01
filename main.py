@@ -114,12 +114,12 @@ def matchFace(person, images, recognizer, labelToName, matchThreshold, confidenc
 numBFrames = 30 #num of frames for initial background, b=background
 bUpdateThreshold = 40 #threshold for background update
 bUpdateFrames = 5 #frames needed to update background
-minFaceSize = (60, 60) #min face size for detection
-faceDistancePercent = 7  # How close faces must be in frame percentage to count a single person
+minFaceSize = (78, 78) #min face size for detection
+faceDistancePercent = 20  # How close faces must be in frame percentage to count a single person
 faceBufferSize = 15  # Number of faces to store in each person's face buffer
-frameMemory = 1000  # Number of frames without adding a new face capture to the same person before it "forgets"
+frameMemory = 400  # Number of frames without adding a new face capture to the same person before it "forgets"
 matchThreshold = 3 #number of matches to count as a match for each permutation of dict images and images of tracked person
-confidenceThreshold = 75 #lower = stricter matching
+confidenceThreshold = 80 #lower = stricter matching
 
 #if not os.path.exists('savedFrames'): #prob don't need to save every individual frame but putting this here anyways incase we decide to
 #    os.makedirs('savedFrames')
@@ -257,7 +257,7 @@ while True:
                 people_info.append(current_person)
                 people_dict[current_person] = []
 
-            if fgRatio > 0.1: #at least 20% of face region is foreground
+            if fgRatio > 0.15: #at least 15% of face region is foreground
                 totalFacesDetected+=1
 
                 # Draw box around face; Unknowns are red, knowns are green
